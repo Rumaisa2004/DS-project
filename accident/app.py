@@ -407,32 +407,62 @@ def show_temporal_patterns(df):
     with col1:
         # Hourly distribution
         st.markdown("### Accidents by Hour of Day")
-        hourly_counts = df['Hour_of_day'].value_counts().sort_index()
-        
-        fig_hour = px.line(
-            x=hourly_counts.index, 
-            y=hourly_counts.values,
-            title="Accident Distribution Throughout the Day"
-        )
-        fig_hour.update_traces(mode='lines+markers')
-        fig_hour.update_xaxis(title="Hour of Day")
-        fig_hour.update_layout(xaxis=dict(dtick=2))
-        fig_hour.update_yaxis(title="Number of Accidents")
-        st.plotly_chart(fig_hour, use_container_width=True)
+        try:
+            hourly_counts = df['Hour_of_day'].value_counts().sort_index()
+            
+            if len(hourly_counts) > 0:
+                fig_hour = px.line(
+                    x=hourly_counts.index, 
+                    y=hourly_counts.values,
+                    title="Accident Distribution Throughout the Day",
+                    labels={'x': 'Hour of Day', 'y': 'Number of Accidents'}
+                )
+                fig_hour.update_traces(mode='lines+markers')
+                fig_hour.update_layout(
+                    xaxis_title="Hour of Day",
+                    yaxis_title="Number of Accidents",
+                    xaxis=dict(dtick=2)
+                )
+                st.plotly_chart(fig_hour, use_container_width=True)
+            else:
+                st.warning("No hourly data available")
+        except Exception as e:
+            st.error(f"Error creating hourly chart: {str(e)}")
+            # Fallback simple chart
+            try:
+                hourly_data = df.groupby('Hour_of_day').size()
+                st.bar_chart(hourly_data)
+            except:
+                st.warning("Could not create hourly distribution chart")
     
     with col2:
         # Daily distribution
         st.markdown("### Accidents by Day of Week")
-        daily_counts = df['Day_of_week_Label'].value_counts().reindex(day_order)
-        
-        fig_day = px.bar(
-            x=daily_counts.index,
-            y=daily_counts.values,
-            title="Accident Distribution by Day of Week"
-        )
-        fig_day.update_xaxis(title="Day of Week")
-        fig_day.update_yaxis(title="Number of Accidents")
-        st.plotly_chart(fig_day, use_container_width=True)
+        try:
+            daily_counts = df['Day_of_week_Label'].value_counts().reindex(day_order)
+            
+            if not daily_counts.empty:
+                fig_day = px.bar(
+                    x=daily_counts.index,
+                    y=daily_counts.values,
+                    title="Accident Distribution by Day of Week",
+                    labels={'x': 'Day of Week', 'y': 'Number of Accidents'}
+                )
+                fig_day.update_layout(
+                    xaxis_title="Day of Week",
+                    yaxis_title="Number of Accidents"
+                )
+                st.plotly_chart(fig_day, use_container_width=True)
+            else:
+                st.warning("No daily data available")
+        except Exception as e:
+            st.error(f"Error creating daily chart: {str(e)}")
+            # Fallback simple chart
+            try:
+                daily_data = df.groupby('Day_of_week_Label').size()
+                st.bar_chart(daily_data)
+            except:
+                st.warning("Could not create daily distribution chart")
     
     # Heatmap
     st.markdown("### Hourly-Daily Accident Heatmap")
@@ -475,6 +505,7 @@ def show_temporal_patterns(df):
             st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
     except Exception as e:
         st.warning(f"Could not calculate peak times: {str(e)}")
+
 def show_high_risk_areas(df):
     """Show high-risk areas analysis"""
     st.markdown('<h2 class="sub-header">📍 High-Risk Areas Analysis</h2>', unsafe_allow_html=True)
