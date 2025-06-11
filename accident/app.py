@@ -487,8 +487,11 @@ def show_temporal_patterns(df):
             title="Accident Frequency Heatmap (Hour vs Day)",
             color_continuous_scale="Viridis"
         )
-        fig_heatmap.update_xaxis(title="Day of Week")
-        fig_heatmap.update_yaxis(title="Hour of Day")
+        # Fixed: Use update_layout instead of update_xaxis/update_yaxis
+        fig_heatmap.update_layout(
+            xaxis_title="Day of Week",
+            yaxis_title="Hour of Day"
+        )
         st.plotly_chart(fig_heatmap, use_container_width=True)
     except Exception as e:
         st.warning(f"Could not generate heatmap: {str(e)}")
@@ -505,7 +508,7 @@ def show_temporal_patterns(df):
             st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
     except Exception as e:
         st.warning(f"Could not calculate peak times: {str(e)}")
-
+        
 def show_high_risk_areas(df):
     """Show high-risk areas analysis"""
     st.markdown('<h2 class="sub-header">📍 High-Risk Areas Analysis</h2>', unsafe_allow_html=True)
