@@ -228,8 +228,16 @@ def show_data_overview(df):
             st.metric("Unique Areas", "N/A")
     with col4:
         if 'Accident_severity' in df.columns:
-            avg_severity = df['Accident_severity'].mean()
-            st.metric("Avg Severity", f"{avg_severity:.2f}")
+            # Handle both numeric and categorical severity
+            try:
+                avg_severity = pd.to_numeric(df['Accident_severity'], errors='coerce').mean()
+                if pd.isna(avg_severity):
+                    # If conversion fails, show unique categories count
+                    st.metric("Severity Categories", df['Accident_severity'].nunique())
+                else:
+                    st.metric("Avg Severity", f"{avg_severity:.2f}")
+            except:
+                st.metric("Severity Categories", df['Accident_severity'].nunique())
         else:
             st.metric("Avg Severity", "N/A")
     
@@ -256,7 +264,7 @@ def show_data_overview(df):
             'Missing %': (df.isnull().sum() / len(df) * 100).round(2).values
         })
         st.dataframe(missing_data, use_container_width=True)
-
+        
 def show_accident_causes(df):
     """Show primary accident causes analysis"""
     st.markdown('<h2 class="sub-header">🚗 Primary Accident Causes</h2>', unsafe_allow_html=True)
@@ -385,7 +393,10 @@ def show_temporal_patterns(df):
             df.loc[mask, 'Hour_of_day'] = pd.to_datetime(df.loc[mask, 'Time'], format='%H:%M:%S', errors='coerce').dt.hour
     except:
         # Fallback: extract hour manually
-        df['Hour_of_day'] = df['Time'].str.split(':').str[0].astype(int)
+        df['Hour_of_day'] = df['Time'].str.split(':').str[0].astype(int, errors='ignore')
+    
+    # Fill any remaining NaN values with 0
+    df['Hour_of_day'] = df['Hour_of_day'].fillna(0)
     
     # Use the existing day names
     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -404,7 +415,7 @@ def show_temporal_patterns(df):
             title="Accident Distribution Throughout the Day"
         )
         fig_hour.update_traces(mode='lines+markers')
-        fig_hour.update_xaxis(title="Hour of Day", dtick=2)
+        fig_hour.update_xaxis(title="Hour of Day", tick0=0, dtick=2)  # Fixed dtick usage
         fig_hour.update_yaxis(title="Number of Accidents")
         st.plotly_chart(fig_hour, use_container_width=True)
     
@@ -424,39 +435,45 @@ def show_temporal_patterns(df):
     
     # Heatmap
     st.markdown("### Hourly-Daily Accident Heatmap")
-    pivot_table = df.pivot_table(
-        values='Time', 
-        index='Hour_of_day', 
-        columns='Day_of_week_Label', 
-        aggfunc='count', 
-        fill_value=0
-    )
-    
-    # Reorder columns to match day_order
-    pivot_table = pivot_table.reindex(columns=day_order, fill_value=0)
-    
-    fig_heatmap = px.imshow(
-        pivot_table.values,
-        x=pivot_table.columns,
-        y=pivot_table.index,
-        aspect="auto",
-        title="Accident Frequency Heatmap (Hour vs Day)",
-        color_continuous_scale="Viridis"
-    )
-    fig_heatmap.update_xaxis(title="Day of Week")
-    fig_heatmap.update_yaxis(title="Hour of Day")
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    try:
+        pivot_table = df.pivot_table(
+            values='Time', 
+            index='Hour_of_day', 
+            columns='Day_of_week_Label', 
+            aggfunc='count', 
+            fill_value=0
+        )
+        
+        # Reorder columns to match day_order
+        available_days = [day for day in day_order if day in pivot_table.columns]
+        pivot_table = pivot_table.reindex(columns=available_days, fill_value=0)
+        
+        fig_heatmap = px.imshow(
+            pivot_table.values,
+            x=pivot_table.columns,
+            y=pivot_table.index,
+            aspect="auto",
+            title="Accident Frequency Heatmap (Hour vs Day)",
+            color_continuous_scale="Viridis"
+        )
+        fig_heatmap.update_xaxis(title="Day of Week")
+        fig_heatmap.update_yaxis(title="Hour of Day")
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not generate heatmap: {str(e)}")
     
     # Temporal insights
-    peak_hour = hourly_counts.idxmax()
-    peak_day = daily_counts.idxmax()
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.success(f"**Peak Hour:** {peak_hour}:00 ({hourly_counts[peak_hour]} accidents)")
-    with col2:
-        st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
+    try:
+        peak_hour = hourly_counts.idxmax()
+        peak_day = daily_counts.idxmax()
         
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"**Peak Hour:** {peak_hour}:00 ({hourly_counts[peak_hour]} accidents)")
+        with col2:
+            st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
+    except Exception as e:
+        st.warning(f"Could not calculate peak times: {str(e)}")
 def show_high_risk_areas(df):
     """Show high-risk areas analysis"""
     st.markdown('<h2 class="sub-header">📍 High-Risk Areas Analysis</h2>', unsafe_allow_html=True)
@@ -568,31 +585,94 @@ def show_predictive_analytics(df):
     with st.spinner("Training accident severity prediction model..."):
         df_pred = df.copy()
         
-        # Create binary target
-        df_pred['Accident_severity_binary'] = (df_pred['Accident_severity'] >= 0.5).astype(int)
+        # Handle different types of severity data
+        try:
+            # Try to convert to numeric first
+            df_pred['Accident_severity_numeric'] = pd.to_numeric(df_pred['Accident_severity'], errors='coerce')
+            
+            if df_pred['Accident_severity_numeric'].isna().all():
+                # If all values are NaN, treat as categorical
+                severity_categories = df_pred['Accident_severity'].value_counts()
+                
+                # Create binary target based on severity categories
+                # Assume categories like 'Fatal', 'Serious', 'Slight' or similar
+                high_severity_keywords = ['fatal', 'serious', 'severe', 'major', 'high']
+                
+                def is_high_severity(severity_str):
+                    return any(keyword in str(severity_str).lower() for keyword in high_severity_keywords)
+                
+                df_pred['Accident_severity_binary'] = df_pred['Accident_severity'].apply(is_high_severity).astype(int)
+            else:
+                # Use numeric threshold
+                severity_threshold = df_pred['Accident_severity_numeric'].median()
+                df_pred['Accident_severity_binary'] = (df_pred['Accident_severity_numeric'] >= severity_threshold).astype(int)
+                
+        except Exception as e:
+            st.error(f"Error processing severity data: {str(e)}")
+            return
         
         # Feature selection
-        prediction_features = ['Time', 'Day_of_week']
+        prediction_features = []
+        
+        # Handle time feature
+        if 'Time' in df_pred.columns:
+            try:
+                # Extract hour from time
+                df_pred['Hour'] = pd.to_datetime(df_pred['Time'], format='%H:%M:%S', errors='coerce').dt.hour
+                df_pred['Hour'] = df_pred['Hour'].fillna(0)  # Fill NaN with 0
+                prediction_features.append('Hour')
+            except:
+                # If time parsing fails, create a dummy feature
+                df_pred['Hour'] = 0
+                prediction_features.append('Hour')
+        
+        # Handle day feature
+        if 'Day_of_week' in df_pred.columns:
+            try:
+                # Try to convert day names to numbers
+                day_mapping = {'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 
+                              'Friday': 5, 'Saturday': 6, 'Sunday': 7}
+                df_pred['Day_numeric'] = df_pred['Day_of_week'].map(day_mapping)
+                df_pred['Day_numeric'] = df_pred['Day_numeric'].fillna(1)  # Fill NaN with Monday
+                prediction_features.append('Day_numeric')
+            except:
+                # Create dummy feature
+                df_pred['Day_numeric'] = 1
+                prediction_features.append('Day_numeric')
+        
+        # Encode categorical variables
         categorical_features = ['Sex_of_driver', 'Type_of_vehicle', 'Weather_conditions', 
                               'Light_conditions', 'Road_surface_type']
         
-        # Encode categorical variables
         le_dict_severity = {}
         for col in categorical_features:
             if col in df_pred.columns:
-                le = LabelEncoder()
-                df_pred[col + '_encoded'] = le.fit_transform(df_pred[col].astype(str))
-                le_dict_severity[col] = le
-                prediction_features.append(col + '_encoded')
+                try:
+                    le = LabelEncoder()
+                    df_pred[col + '_encoded'] = le.fit_transform(df_pred[col].astype(str).fillna('Unknown'))
+                    le_dict_severity[col] = le
+                    prediction_features.append(col + '_encoded')
+                except:
+                    continue
+        
+        # Ensure we have at least some features
+        if not prediction_features:
+            st.error("No suitable features found for prediction")
+            return
         
         # Prepare training data
         X = df_pred[prediction_features]
         y = df_pred['Accident_severity_binary']
         
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Check if we have enough data
+        if len(X) < 10:
+            st.error("Not enough data for training (minimum 10 records required)")
+            return
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         
         # Train model
-        rf_severity = RandomForestClassifier(random_state=42, n_estimators=100)
+        rf_severity = RandomForestClassifier(random_state=42, n_estimators=50)  # Reduced estimators for speed
         rf_severity.fit(X_train, y_train)
         
         y_pred_severity = rf_severity.predict(X_test)
@@ -610,92 +690,52 @@ def show_predictive_analytics(df):
     
     with col1:
         # Performance metrics
-        report = classification_report(y_test, y_pred_severity, output_dict=True)
-        accuracy = report['accuracy']
-        precision = report['1']['precision']
-        recall = report['1']['recall']
-        
-        st.metric("Accuracy", f"{accuracy:.2%}")
-        st.metric("Precision", f"{precision:.2%}")
-        st.metric("Recall", f"{recall:.2%}")
-        
-        # Confusion matrix
-        cm = confusion_matrix(y_test, y_pred_severity)
-        fig_cm = px.imshow(cm, text_auto=True, aspect="auto", 
-                          title="Confusion Matrix",
-                          labels=dict(x="Predicted", y="Actual"))
-        st.plotly_chart(fig_cm, use_container_width=True)
+        try:
+            report = classification_report(y_test, y_pred_severity, output_dict=True)
+            accuracy = report['accuracy']
+            
+            st.metric("Accuracy", f"{accuracy:.2%}")
+            
+            if '1' in report:
+                precision = report['1']['precision']
+                recall = report['1']['recall']
+                st.metric("Precision", f"{precision:.2%}")
+                st.metric("Recall", f"{recall:.2%}")
+            
+            # Confusion matrix
+            cm = confusion_matrix(y_test, y_pred_severity)
+            fig_cm = px.imshow(cm, text_auto=True, aspect="auto", 
+                              title="Confusion Matrix",
+                              labels=dict(x="Predicted", y="Actual"))
+            st.plotly_chart(fig_cm, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not generate detailed metrics: {str(e)}")
     
     with col2:
         # Feature importance
-        feature_importance = pd.DataFrame({
-            'Feature': prediction_features,
-            'Importance': rf_severity.feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        fig_importance = px.bar(
-            feature_importance,
-            x='Importance',
-            y='Feature',
-            orientation='h',
-            title="Feature Importance for Severity Prediction"
-        )
-        st.plotly_chart(fig_importance, use_container_width=True)
+        try:
+            feature_importance = pd.DataFrame({
+                'Feature': prediction_features,
+                'Importance': rf_severity.feature_importances_
+            }).sort_values('Importance', ascending=False)
+            
+            fig_importance = px.bar(
+                feature_importance,
+                x='Importance',
+                y='Feature',
+                orientation='h',
+                title="Feature Importance for Severity Prediction"
+            )
+            st.plotly_chart(fig_importance, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not generate feature importance: {str(e)}")
     
-    # Prediction interface
-    st.markdown("### 🎯 Make Predictions")
-    st.info("Use the trained model to predict accident severity for new scenarios")
+    # Show severity distribution
+    st.markdown("### Severity Distribution")
+    severity_dist = df['Accident_severity'].value_counts()
+    fig_dist = px.bar(x=severity_dist.index, y=severity_dist.values, 
+                     title="Distribution of Accident Severity")
+    st.plotly_chart(fig_dist, use_container_width=True)
     
-    if st.session_state.models_trained:
-        with st.form("prediction_form"):
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                pred_time = st.slider("Time of Day", 0.0, 1.0, 0.5, 0.01)
-                pred_day = st.slider("Day of Week", 0.0, 1.0, 0.5, 0.01)
-            
-            with col2:
-                if 'Sex_of_driver' in df.columns:
-                    pred_gender = st.selectbox("Driver Gender", df['Sex_of_driver'].unique())
-                if 'Type_of_vehicle' in df.columns:
-                    pred_vehicle = st.selectbox("Vehicle Type", df['Type_of_vehicle'].unique())
-            
-            with col3:
-                if 'Weather_conditions' in df.columns:
-                    pred_weather = st.selectbox("Weather", df['Weather_conditions'].unique())
-                if 'Light_conditions' in df.columns:
-                    pred_light = st.selectbox("Light Conditions", df['Light_conditions'].unique())
-            
-            submit_prediction = st.form_submit_button("🔮 Predict Accident Severity")
-            
-            if submit_prediction:
-                # Prepare prediction data
-                pred_data = [pred_time, pred_day]
-                
-                # Encode categorical variables
-                for col in categorical_features:
-                    if col in df.columns and col in st.session_state.le_dict_severity:
-                        if col == 'Sex_of_driver':
-                            encoded_val = st.session_state.le_dict_severity[col].transform([pred_gender])[0]
-                        elif col == 'Type_of_vehicle':
-                            encoded_val = st.session_state.le_dict_severity[col].transform([pred_vehicle])[0]
-                        elif col == 'Weather_conditions':
-                            encoded_val = st.session_state.le_dict_severity[col].transform([pred_weather])[0]
-                        elif col == 'Light_conditions':
-                            encoded_val = st.session_state.le_dict_severity[col].transform([pred_light])[0]
-                        else:
-                            encoded_val = 0  # Default value
-                        pred_data.append(encoded_val)
-                
-                # Make prediction
-                prediction = st.session_state.rf_severity.predict([pred_data])[0]
-                probability = st.session_state.rf_severity.predict_proba([pred_data])[0]
-                
-                # Display results
-                if prediction == 1:
-                    st.error(f"⚠️ **High Severity Accident Predicted** (Probability: {probability[1]:.2%})")
-                else:
-                    st.success(f"✅ **Low Severity Accident Predicted** (Probability: {probability[0]:.2%})")
-
 if __name__ == "__main__":
     main()
