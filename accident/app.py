@@ -368,21 +368,28 @@ def show_environmental_factors(df):
 
 def show_temporal_patterns(df):
     """Show temporal patterns analysis"""
-    st.markdown('<h2 class="sub-header">⏰ Temporal Patterns</h2>', unsafe_allow_html=True)
+    st.markdown('<h2>⏰ Temporal Patterns</h2>', unsafe_allow_html=True)
     
     if 'Time' not in df.columns or 'Day_of_week' not in df.columns:
         st.error("Required columns 'Time' or 'Day_of_week' not found")
         return
     
-    # Process time data
-    df['Hour_of_day'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.hour
+    # Process time data - handle inconsistent time format
+    try:
+        # Convert time strings to datetime, handling both 'H:MM:SS' and 'HH:MM:SS' formats
+        df['Hour_of_day'] = pd.to_datetime(df['Time'], format='%H:%M:%S', errors='coerce').dt.hour
+        
+        # For any NaT values, try the alternative format
+        mask = df['Hour_of_day'].isna()
+        if mask.any():
+            df.loc[mask, 'Hour_of_day'] = pd.to_datetime(df.loc[mask, 'Time'], format='%H:%M:%S', errors='coerce').dt.hour
+    except:
+        # Fallback: extract hour manually
+        df['Hour_of_day'] = df['Time'].str.split(':').str[0].astype(int)
+    
+    # Use the existing day names
     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     df['Day_of_week_Label'] = df['Day_of_week']
-    
-    # # Day mapping
-    # day_map = {0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 
-    #            4: 'Thursday', 5: 'Friday', 6: 'Saturday'}
-    # df['Day_of_week_Label'] = df['Day_of_week_Int'].map(day_map)
     
     col1, col2 = st.columns(2)
     
@@ -404,7 +411,6 @@ def show_temporal_patterns(df):
     with col2:
         # Daily distribution
         st.markdown("### Accidents by Day of Week")
-        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         daily_counts = df['Day_of_week_Label'].value_counts().reindex(day_order)
         
         fig_day = px.bar(
@@ -426,13 +432,19 @@ def show_temporal_patterns(df):
         fill_value=0
     )
     
+    # Reorder columns to match day_order
+    pivot_table = pivot_table.reindex(columns=day_order, fill_value=0)
+    
     fig_heatmap = px.imshow(
         pivot_table.values,
         x=pivot_table.columns,
         y=pivot_table.index,
         aspect="auto",
-        title="Accident Frequency Heatmap (Hour vs Day)"
+        title="Accident Frequency Heatmap (Hour vs Day)",
+        color_continuous_scale="Viridis"
     )
+    fig_heatmap.update_xaxis(title="Day of Week")
+    fig_heatmap.update_yaxis(title="Hour of Day")
     st.plotly_chart(fig_heatmap, use_container_width=True)
     
     # Temporal insights
@@ -444,7 +456,7 @@ def show_temporal_patterns(df):
         st.success(f"**Peak Hour:** {peak_hour}:00 ({hourly_counts[peak_hour]} accidents)")
     with col2:
         st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
-
+        
 def show_high_risk_areas(df):
     """Show high-risk areas analysis"""
     st.markdown('<h2 class="sub-header">📍 High-Risk Areas Analysis</h2>', unsafe_allow_html=True)
