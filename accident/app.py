@@ -415,7 +415,8 @@ def show_temporal_patterns(df):
             title="Accident Distribution Throughout the Day"
         )
         fig_hour.update_traces(mode='lines+markers')
-        fig_hour.update_xaxis(title="Hour of Day", tick0=0, dtick=2)  # Fixed dtick usage
+        fig_hour.update_xaxis(title="Hour of Day")
+        fig_hour.update_layout(xaxis=dict(dtick=2))
         fig_hour.update_yaxis(title="Number of Accidents")
         st.plotly_chart(fig_hour, use_container_width=True)
     
