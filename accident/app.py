@@ -508,7 +508,7 @@ def show_temporal_patterns(df):
             st.success(f"**Peak Day:** {peak_day} ({daily_counts[peak_day]} accidents)")
     except Exception as e:
         st.warning(f"Could not calculate peak times: {str(e)}")
-        
+
 def show_high_risk_areas(df):
     """Show high-risk areas analysis"""
     st.markdown('<h2 class="sub-header">📍 High-Risk Areas Analysis</h2>', unsafe_allow_html=True)
@@ -535,78 +535,163 @@ def show_high_risk_areas(df):
     st.markdown("### High-Risk Area Prediction Model")
     
     with st.spinner("Training high-risk area prediction model..."):
-        # Prepare features for clustering/classification
-        features_for_area = ['Time', 'Day_of_week']
-        
-        # Add categorical features if available
-        categorical_features = ['Sex_of_driver', 'Type_of_vehicle', 'Weather_conditions']
-        available_features = [f for f in categorical_features if f in df.columns]
-        
-        if available_features:
-            # Encode categorical variables
+        try:
+            # Create a copy of the dataframe for processing
             df_encoded = df.copy()
-            le_dict = {}
             
-            for col in available_features:
-                le = LabelEncoder()
-                df_encoded[col + '_encoded'] = le.fit_transform(df_encoded[col].astype(str))
-                le_dict[col] = le
-                features_for_area.append(col + '_encoded')
-        
-        # Create high-risk labels
-        high_risk_threshold = area_counts.quantile(0.7)
-        high_risk_areas = area_counts[area_counts >= high_risk_threshold].index.tolist()
-        df_encoded = df_encoded if 'df_encoded' in locals() else df.copy()
-        df_encoded['High_Risk_Area'] = df_encoded['Area_accident_occured'].isin(high_risk_areas).astype(int)
-        
-        # Train model
-        X = df_encoded[features_for_area]
-        y = df_encoded['High_Risk_Area']
-        
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
-        rf_area = RandomForestClassifier(random_state=42, n_estimators=100)
-        rf_area.fit(X_train, y_train)
-        
-        y_pred = rf_area.predict(X_test)
-        
-        # Model performance
-        st.success("✅ High-Risk Area Prediction Model Trained!")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Classification report
-            report = classification_report(y_test, y_pred, output_dict=True)
-            accuracy = report['accuracy']
-            st.metric("Model Accuracy", f"{accuracy:.2%}")
+            # Initialize features list
+            features_for_area = []
             
-            # Feature importance
-            feature_importance = pd.DataFrame({
-                'Feature': features_for_area,
-                'Importance': rf_area.feature_importances_
-            }).sort_values('Importance', ascending=False)
+            # Process Time feature
+            if 'Time' in df.columns:
+                try:
+                    # Extract hour from time
+                    df_encoded['Hour'] = pd.to_datetime(df['Time'], format='%H:%M:%S', errors='coerce').dt.hour
+                    df_encoded['Hour'] = df_encoded['Hour'].fillna(0).astype(int)
+                    features_for_area.append('Hour')
+                except:
+                    st.warning("Could not process Time column")
             
-            fig_importance = px.bar(
-                feature_importance.head(10),
-                x='Importance',
-                y='Feature',
-                orientation='h',
-                title="Feature Importance for Area Risk Prediction"
+            # Process Day_of_week feature
+            if 'Day_of_week' in df.columns:
+                try:
+                    # Map days to numbers
+                    day_mapping = {
+                        'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4,
+                        'Friday': 5, 'Saturday': 6, 'Sunday': 7
+                    }
+                    df_encoded['Day_numeric'] = df_encoded['Day_of_week'].map(day_mapping)
+                    df_encoded['Day_numeric'] = df_encoded['Day_numeric'].fillna(1).astype(int)
+                    features_for_area.append('Day_numeric')
+                except:
+                    st.warning("Could not process Day_of_week column")
+            
+            # Add categorical features if available
+            categorical_features = ['Sex_of_driver', 'Type_of_vehicle', 'Weather_conditions']
+            available_features = [f for f in categorical_features if f in df.columns]
+            
+            if available_features:
+                # Encode categorical variables
+                from sklearn.preprocessing import LabelEncoder
+                le_dict = {}
+                
+                for col in available_features:
+                    try:
+                        le = LabelEncoder()
+                        # Convert to string and handle missing values
+                        col_data = df_encoded[col].astype(str).fillna('Unknown')
+                        df_encoded[col + '_encoded'] = le.fit_transform(col_data)
+                        le_dict[col] = le
+                        features_for_area.append(col + '_encoded')
+                    except Exception as e:
+                        st.warning(f"Could not encode {col}: {str(e)}")
+            
+            # Check if we have enough features
+            if len(features_for_area) == 0:
+                st.error("No suitable features found for model training")
+                return
+            
+            # Create high-risk labels
+            high_risk_threshold = area_counts.quantile(0.7)
+            high_risk_areas = area_counts[area_counts >= high_risk_threshold].index.tolist()
+            df_encoded['High_Risk_Area'] = df_encoded['Area_accident_occured'].isin(high_risk_areas).astype(int)
+            
+            # Prepare features and target
+            X = df_encoded[features_for_area]
+            y = df_encoded['High_Risk_Area']
+            
+            # Ensure all features are numeric and handle any remaining missing values
+            X = X.fillna(0).astype(float)
+            
+            # Check if we have enough data for train/test split
+            if len(X) < 10:
+                st.error("Not enough data for model training")
+                return
+            
+            # Split data
+            from sklearn.model_selection import train_test_split
+            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.metrics import classification_report
+            
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y if y.nunique() > 1 else None
             )
-            st.plotly_chart(fig_importance, use_container_width=True)
-        
-        with col2:
-            # High-risk area stats
-            st.markdown("### High-Risk Area Statistics")
-            st.write(f"**Total Areas:** {df['Area_accident_occured'].nunique()}")
-            st.write(f"**High-Risk Areas:** {len(high_risk_areas)}")
-            st.write(f"**Risk Threshold:** {high_risk_threshold:.0f} accidents")
             
-            # Top 5 high-risk areas
-            st.markdown("**Top 5 High-Risk Areas:**")
-            for i, (area, count) in enumerate(area_counts.head(5).items(), 1):
-                st.write(f"{i}. {area}: {count} accidents")
+            # Train model
+            rf_area = RandomForestClassifier(random_state=42, n_estimators=100)
+            rf_area.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = rf_area.predict(X_test)
+            
+            # Model performance
+            st.success("✅ High-Risk Area Prediction Model Trained!")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Classification report
+                try:
+                    report = classification_report(y_test, y_pred, output_dict=True)
+                    accuracy = report['accuracy']
+                    st.metric("Model Accuracy", f"{accuracy:.2%}")
+                except:
+                    # Fallback accuracy calculation
+                    accuracy = (y_pred == y_test).mean()
+                    st.metric("Model Accuracy", f"{accuracy:.2%}")
+                
+                # Feature importance
+                feature_importance = pd.DataFrame({
+                    'Feature': features_for_area,
+                    'Importance': rf_area.feature_importances_
+                }).sort_values('Importance', ascending=False)
+                
+                fig_importance = px.bar(
+                    feature_importance.head(10),
+                    x='Importance',
+                    y='Feature',
+                    orientation='h',
+                    title="Feature Importance for Area Risk Prediction"
+                )
+                st.plotly_chart(fig_importance, use_container_width=True)
+            
+            with col2:
+                # High-risk area stats
+                st.markdown("### High-Risk Area Statistics")
+                st.write(f"**Total Areas:** {df['Area_accident_occured'].nunique()}")
+                st.write(f"**High-Risk Areas:** {len(high_risk_areas)}")
+                st.write(f"**Risk Threshold:** {high_risk_threshold:.0f} accidents")
+                
+                # Top 5 high-risk areas
+                st.markdown("**Top 5 High-Risk Areas:**")
+                for i, (area, count) in enumerate(area_counts.head(5).items(), 1):
+                    st.write(f"{i}. {area}: {count} accidents")
+                    
+        except Exception as e:
+            st.error(f"Error in model training: {str(e)}")
+            st.info("Displaying basic area analysis instead.")
+            
+            # Fallback: just show the area statistics without ML
+            st.markdown("### Area Statistics (Without ML Model)")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Top 10 Areas by Accident Count:**")
+                for i, (area, count) in enumerate(area_counts.head(10).items(), 1):
+                    st.write(f"{i}. {area}: {count} accidents")
+            
+            with col2:
+                st.markdown("**Area Statistics:**")
+                st.write(f"**Total Areas:** {df['Area_accident_occured'].nunique()}")
+                st.write(f"**Total Accidents:** {len(df)}")
+                st.write(f"**Average per Area:** {len(df) / df['Area_accident_occured'].nunique():.1f}")
+                
+                # Show distribution
+                st.markdown("**Distribution:**")
+                st.write(f"Areas with 1 accident: {(area_counts == 1).sum()}")
+                st.write(f"Areas with 2-5 accidents: {((area_counts >= 2) & (area_counts <= 5)).sum()}")
+                st.write(f"Areas with 5+ accidents: {(area_counts > 5).sum()}")
 
 def show_predictive_analytics(df):
     """Show predictive analytics for accident severity"""
