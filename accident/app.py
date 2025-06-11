@@ -376,12 +376,13 @@ def show_temporal_patterns(df):
     
     # Process time data
     df['Hour_of_day'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.hour
-    df['Day_of_week_Int'] = (df['Day_of_week'] * 6).round().astype(int)
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    df['Day_of_week_Label'] = df['Day_of_week']
     
-    # Day mapping
-    day_map = {0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 
-               4: 'Thursday', 5: 'Friday', 6: 'Saturday'}
-    df['Day_of_week_Label'] = df['Day_of_week_Int'].map(day_map)
+    # # Day mapping
+    # day_map = {0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 
+    #            4: 'Thursday', 5: 'Friday', 6: 'Saturday'}
+    # df['Day_of_week_Label'] = df['Day_of_week_Int'].map(day_map)
     
     col1, col2 = st.columns(2)
     
