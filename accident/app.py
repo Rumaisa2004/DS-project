@@ -375,7 +375,7 @@ def show_temporal_patterns(df):
         return
     
     # Process time data
-    df['Hour_of_day'] = (df['Time'] * 24).round().astype(int)
+    df['Hour_of_day'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.hour
     df['Day_of_week_Int'] = (df['Day_of_week'] * 6).round().astype(int)
     
     # Day mapping
